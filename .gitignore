@@ -1,2 +1,6 @@
 dataset/*
 checkpoints/*
+result/*
+wandb/*
+__pycache__/*
+.vscode/*
