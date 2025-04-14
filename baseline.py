@@ -30,6 +30,7 @@ from torchsummary import summary
 import random
 from torch.optim import Adam
 import torchvision.models as models
+
 # 导入wandb进行实验跟踪
 import wandb
 from datetime import datetime
@@ -123,7 +124,7 @@ def img_size_summary():
     # 保存图像到文件
     plt.savefig("image_size_summary.png")
     plt.close()
-    
+
     # 记录到wandb
     if wandb.run is not None:
         wandb.log({"image_size_summary": wandb.Image("image_size_summary.png")})
@@ -153,7 +154,7 @@ def bbox_summary():
     # 保存图像到文件
     plt.savefig("bbox_summary.png")
     plt.close()
-    
+
     # 记录到wandb
     if wandb.run is not None:
         wandb.log({"bbox_summary": wandb.Image("bbox_summary.png")})
@@ -172,22 +173,22 @@ def label_summary():
         dicts[len(mark["label"])] += 1
 
     dicts = sorted(dicts.items(), key=lambda x: x[0])
-    
+
     # 创建可视化
     labels = [f"{k}个数字" for k, _ in dicts]
     values = [v for _, v in dicts]
-    
+
     plt.figure(figsize=(10, 6))
     plt.bar(labels, values)
     plt.title("Number of Digits Distribution")
     plt.ylabel("Count")
     plt.savefig("label_distribution.png")
     plt.close()
-    
+
     # 记录到wandb
     if wandb.run is not None:
         wandb.log({"label_distribution": wandb.Image("label_distribution.png")})
-        
+
     for k, v in dicts:
         print("%d个数字的图片数目: %d" % (k, v))
 
@@ -217,8 +218,7 @@ class Config:
     scheduler_T0 = 40
     scheduler_Tmult = 2
     scheduler_eta_min = 0
-    
-    
+
 
 config = Config()
 
@@ -240,7 +240,9 @@ class DigitsDataset(Dataset):
         self.width = 224
         self.batch_count = 0
         if "vit" in config.model.lower():
-            self.trans_transform = ViTFeatureExtractor.from_pretrained('google/vit-large-patch16-224')
+            self.trans_transform = ViTFeatureExtractor.from_pretrained(
+                "google/vit-large-patch16-224"
+            )
         if mode == "test":
             self.imgs = glob(data_dir["test_data"] + "*.png")
             self.labels = None
@@ -261,11 +263,15 @@ class DigitsDataset(Dataset):
             label = None
         img = Image.open(img)
         if "vit" in config.model.lower():
-            img = self.trans_transform(np.array(img), return_tensors='pt')
+            img = self.trans_transform(np.array(img), return_tensors="pt")[
+                "pixel_values"
+            ].squeeze(0)
             if self.mode != "test":
                 return (
                     img,
-                    t.tensor(label["label"][:4] + (4 - len(label["label"])) * [10]).long(),
+                    t.tensor(
+                        label["label"][:4] + (4 - len(label["label"])) * [10]
+                    ).long(),
                 )
             else:
                 # trans1.append(transforms.RandomErasing(scale=(0.02, 0.1)))
@@ -273,7 +279,9 @@ class DigitsDataset(Dataset):
         else:
             trans0 = [
                 transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+                ),
             ]
             min_size = (
                 self.size[0]
@@ -293,7 +301,9 @@ class DigitsDataset(Dataset):
             if self.mode != "test":
                 return (
                     transforms.Compose(trans1)(img),
-                    t.tensor(label["label"][:4] + (4 - len(label["label"])) * [10]).long(),
+                    t.tensor(
+                        label["label"][:4] + (4 - len(label["label"])) * [10]
+                    ).long(),
                 )
             else:
                 # trans1.append(transforms.RandomErasing(scale=(0.02, 0.1)))
@@ -311,10 +321,11 @@ class DigitsDataset(Dataset):
         self.batch_count += 1
         return t.stack(imgs).float(), t.stack(labels)
 
+
 class DigitsResnet101(nn.Module):
     def __init__(self, class_num=11):
         super(DigitsResnet101, self).__init__()
-        self.net = models.resnet101(weights = 'IMAGENET1K_V2')
+        self.net = models.resnet101(weights="IMAGENET1K_V2")
         self.net = nn.Sequential(*list(self.net.children())[:-1])
         ct = 0
         for child in self.net.children():
@@ -338,12 +349,10 @@ class DigitsResnet101(nn.Module):
         return c1, c2, c3, c4
 
 
-
-
 class DigitsViT(nn.Module):
-    def __init__(self, class_num=11,dp_rate=0):
+    def __init__(self, class_num=11, dp_rate=0):
         super(DigitsViT, self).__init__()
-        vit = ViTModel.from_pretrained('google/vit-base-patch16-224-in21k')
+        vit = ViTModel.from_pretrained("google/vit-base-patch16-224-in21k")
 
         count = 0
         for child in vit.children():
@@ -363,7 +372,9 @@ class DigitsViT(nn.Module):
 
     def forward(self, img):
         result_trans = self.model_trans_top(img)
-        patch_state = result_trans.last_hidden_state[:,1:,:] # Remove the classification token and get the last hidden state of all patchs
+        patch_state = result_trans.last_hidden_state[
+            :, 1:, :
+        ]  # Remove the classification token and get the last hidden state of all patchs
         result_trans = self.trans_layer_norm(patch_state)
         result_trans = self.trans_flatten(patch_state)
         result_trans = self.dropout(result_trans)
@@ -374,7 +385,8 @@ class DigitsViT(nn.Module):
         c3 = self.fc3(feat)
         c4 = self.fc4(feat)
         return c1, c2, c3, c4
-    
+
+
 class DigitsResnet50(nn.Module):
     def __init__(self, class_num=11):
         super(DigitsResnet50, self).__init__()
@@ -436,9 +448,9 @@ class Trainer:
             self.train_set,
             batch_size=config.batch_size,
             shuffle=True,
-            num_workers=4,
+            num_workers=0,
             pin_memory=True,
-            persistent_workers=True,
+            # persistent_workers=True,
             drop_last=True,
             collate_fn=self.train_set.collect_fn,
         )
@@ -446,10 +458,10 @@ class Trainer:
             self.val_loader = DataLoader(
                 DigitsDataset(mode="val", aug=False),
                 batch_size=config.batch_size,
-                num_workers=4,
+                num_workers=0,
                 pin_memory=True,
                 drop_last=False,
-                persistent_workers=True,
+                # persistent_workers=True,
             )
         else:
             self.val_loader = None
@@ -458,7 +470,7 @@ class Trainer:
         elif config.model == "resnet50":
             self.model = DigitsResnet50(config.class_num).to(self.device)
         elif config.model == "vit":
-            self.model = DigitsViT(config.class_num,dp_rate=0.1).to(self.device)
+            self.model = DigitsViT(config.class_num, dp_rate=0.1).to(self.device)
         else:
             RuntimeError("No such model")
         self.criterion = LabelSmoothEntropy().to(self.device)
@@ -471,7 +483,10 @@ class Trainer:
             amsgrad=False,
         )
         self.lr_scheduler = CosineAnnealingWarmRestarts(
-            self.optimizer, T_0=config.scheduler_T0, T_mult=config.scheduler_Tmult, eta_min=config.scheduler_eta_min
+            self.optimizer,
+            T_0=config.scheduler_T0,
+            T_mult=config.scheduler_Tmult,
+            eta_min=config.scheduler_eta_min,
         )
         self.best_acc = 0
         self.best_checkpoint_path = ""
@@ -491,20 +506,26 @@ class Trainer:
         for epoch in range(config.start_epoch, config.epoches):
             # 训练一个epoch并获取训练准确率
             train_acc = self.train_epoch(epoch)
-            
+
             # 使用wandb记录训练准确率
             if wandb.run is not None:
-                wandb.log({"epoch": epoch, "train_acc": train_acc, "learning_rate": self.optimizer.param_groups[0]['lr']})
-            
+                wandb.log(
+                    {
+                        "epoch": epoch,
+                        "train_acc": train_acc,
+                        "learning_rate": self.optimizer.param_groups[0]["lr"],
+                    }
+                )
+
             if (epoch + 1) % config.eval_interval == 0:
                 print("Start Evaluation")
                 if self.val_loader is not None:
                     acc = self.eval()
-                    
+
                     # 使用wandb记录验证准确率
                     if wandb.run is not None:
                         wandb.log({"val_acc": acc * 100, "epoch": epoch})
-                        
+
                     # 保存最优模型
                     if acc > self.best_acc:
                         os.makedirs(config.checkpoints, exist_ok=True)
@@ -516,7 +537,6 @@ class Trainer:
                         print("%s saved successfully..." % save_path)
                         self.best_acc = acc
                         self.best_checkpoint_path = save_path
-                        
 
     def train_epoch(self, epoch):
         total_loss = 0
@@ -534,11 +554,11 @@ class Trainer:
                 + self.criterion(pred[2], label[:, 2])
                 + self.criterion(pred[3], label[:, 3])
             )
-            
+
             total_loss += loss.item()
             loss.backward()
             self.optimizer.step()
-            
+
             # 计算准确率
             temp = t.stack(
                 [
@@ -550,27 +570,26 @@ class Trainer:
                 dim=1,
             )
             corrects += t.all(temp, dim=1).sum().item()
-            
+
             batch_acc = corrects * 100 / ((i + 1) * config.batch_size)
-            tbar.set_description(
-                "loss: %.3f, acc: %.3f"
-                % (loss / (i + 1), batch_acc)
-            )
-            
+            tbar.set_description("loss: %.3f, acc: %.3f" % (loss / (i + 1), batch_acc))
+
             # 定期记录batch训练信息到wandb
             if (i + 1) % config.print_interval == 0:
                 self.lr_scheduler.step()
-                
+
             # 记录学习率、损失和准确率
             if wandb.run is not None:
-                wandb.log({
-                    "batch": i + epoch * len(self.train_loader),
-                    "epoch": epoch +i/len(self.train_loader),
-                    "batch_loss": loss.item(),
-                    "batch_acc": batch_acc,
-                    "learning_rate": self.optimizer.param_groups[0]['lr']
-                })
-                    
+                wandb.log(
+                    {
+                        "batch": i + epoch * len(self.train_loader),
+                        "epoch": epoch + i / len(self.train_loader),
+                        "batch_loss": loss.item(),
+                        "batch_acc": batch_acc,
+                        "learning_rate": self.optimizer.param_groups[0]["lr"],
+                    }
+                )
+
         # 返回整个epoch的训练准确率
         return corrects * 100 / ((i + 1) * config.batch_size)
 
@@ -578,14 +597,14 @@ class Trainer:
         self.model.eval()
         corrects = 0
         total_samples = 0
-        
+
         with t.no_grad():
             tbar = tqdm(self.val_loader)
             for i, (img, label) in enumerate(tbar):
                 img = img.to(self.device)
                 label = label.to(self.device)
                 pred = self.model(img)
-                
+
                 # 计算准确率
                 temp = t.stack(
                     [
@@ -599,12 +618,10 @@ class Trainer:
                 batch_corrects = t.all(temp, dim=1).sum().item()
                 corrects += batch_corrects
                 total_samples += img.size(0)
-                
+
                 # 更新进度条信息
-                tbar.set_description(
-                    "Val Acc: %.2f" % (corrects * 100 / total_samples)
-                )
-                
+                tbar.set_description("Val Acc: %.2f" % (corrects * 100 / total_samples))
+
         self.model.train()
         return corrects / total_samples
 
@@ -620,7 +637,7 @@ class Trainer:
                 if not s.startswith("_")
             }
         t.save(dicts, save_path)
-        
+
         # 将模型保存到wandb
         # if wandb.run is not None:
         #     wandb.save(save_path)
@@ -642,8 +659,6 @@ class Trainer:
         if save_config:
             for k, v in dicts["config"].items():
                 config.__setattr__(k, v)
-
-
 
 
 def parse2class(prediction):
@@ -683,71 +698,71 @@ def predicts(model_path, csv_path):
         wandb.init(
             project="digits-recognition-inference",
             name=f"inference_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-            config={"model_path": model_path}
+            config={"model_path": model_path},
         )
-    
+
     test_loader = DataLoader(
         DigitsDataset(mode="test", aug=False),
         batch_size=config.batch_size,
         shuffle=False,
-        num_workers=4,
+        num_workers=0,
         pin_memory=True,
         drop_last=False,
-        persistent_workers=True,
+        # persistent_workers=True,
     )
     results = []
     res_path = model_path
-    
+
     # 根据模型路径判断使用哪个模型架构
     if "resnet101" in model_path:
         res_net = DigitsResnet101().cuda()
     else:
         res_net = DigitsResnet50().cuda()
-        
+
     res_net.load_state_dict(t.load(res_path)["model"])
     print("Load model from %s successfully" % model_path)
-    
+
     # 记录模型结构到wandb
     if wandb.run is not None:
         wandb.watch(res_net, log="all", log_freq=100)
-    
+
     tbar = tqdm(test_loader)
     res_net.eval()
     with t.no_grad():
         for i, (img, img_names) in enumerate(tbar):
             img = img.to(t.device("cuda"))
             pred = res_net(img)
-            
+
             # 获取预测结果
             batch_results = parse2class(pred)
-            results += [
-                [name, code] for name, code in zip(img_names, batch_results)
-            ]
-            
+            results += [[name, code] for name, code in zip(img_names, batch_results)]
+
             # 记录一些预测样本到wandb
 
-
             # 将固定间隔改为概率抽样
-            if random.random() < 1/50 and wandb.run is not None:
+            if random.random() < 1 / 50 and wandb.run is not None:
                 sample_imgs = img[:].cpu()
                 sample_preds = batch_results[:]
-            
-                # 显示样本和预测结果
-                wandb.log({
-                    f"test_samples_{i}": [wandb.Image(img_tensor, caption=f"Pred: {pred}")
-                            for img_tensor, pred in zip(sample_imgs, sample_preds[:])]
-                })
 
-    
+                # 显示样本和预测结果
+                wandb.log(
+                    {
+                        f"test_samples_{i}": [
+                            wandb.Image(img_tensor, caption=f"Pred: {pred}")
+                            for img_tensor, pred in zip(sample_imgs, sample_preds[:])
+                        ]
+                    }
+                )
+
     # 排序并保存结果
     results = sorted(results, key=lambda x: x[0])
     write2csv(results, csv_path)
-    
+
     # 记录结果文件到wandb
     if wandb.run is not None:
         wandb.save(csv_path)
         # wandb.finish()  # 完成推理后结束wandb会话
-        
+
     return results
 
 
@@ -756,38 +771,36 @@ if __name__ == "__main__":
     config.model = "vit"
     config.epoches = 17
     config.scheduler_T0 = 50
-    for freeze_layer_num in range(0, 10):
-        config.freeze_layer_num = freeze_layer_num
-        save_dir = create_timestamped_folder(f"freeze_{config.freeze_layer_num}_{config.model}",base_dir="result")
-        config.checkpoints = os.path.join(save_dir, "checkpoints")
-        # 初始化wandb
-        wandb.init(
-            project="digits-recognition",
-            name=f"freeze_{config.freeze_layer_num}_{config.model}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-            config={
-                "model": config.model,
-                "batch_size": config.batch_size,
-                "learning_rate": config.lr,
-                "epochs": config.epoches,
-                "optimizer": "Adam",
-                "scheduler": config.scheduler,
-                "label_smoothing": config.smooth,
-                "pretrained": config.pretrained,
-                "freeze_layer_num": config.freeze_layer_num,
-                "class_num": config.class_num,
-            }
-        )
-        
+    # for freeze_layer_num in range(0, 10):
+    # config.freeze_layer_num = freeze_layer_num
+    save_dir = create_timestamped_folder(f"{config.model}", base_dir="result")
+    config.checkpoints = os.path.join(save_dir, "checkpoints")
+    # 初始化wandb
+    wandb.init(
+        project="digits-recognition",
+        name=f"{config.model}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+        config={
+            "model": config.model,
+            "batch_size": config.batch_size,
+            "learning_rate": config.lr,
+            "epochs": config.epoches,
+            "optimizer": "Adam",
+            "scheduler": config.scheduler,
+            "label_smoothing": config.smooth,
+            "pretrained": config.pretrained,
+            "freeze_layer_num": config.freeze_layer_num,
+            "class_num": config.class_num,
+        },
+    )
 
-        
-        # 训练模型
-        trainer = Trainer()
-        trainer.train()
-            
-        result_csv = os.path.join(save_dir, "result.csv")
-        predicts(trainer.best_checkpoint_path, result_csv)
-        
-        # 结束wandb会话
-        wandb.finish()
+    # 训练模型
+    trainer = Trainer()
+    trainer.train()
+
+    result_csv = os.path.join(save_dir, "result.csv")
+    predicts(trainer.best_checkpoint_path, result_csv)
+
+    # 结束wandb会话
+    wandb.finish()
 
 # predicts("/data/zhangzicheng/workspace/study/Char_Recognizer/result/2025-04-14_12-47-15_freeze_6_resnet101/checkpoints/epoch-resnet50-33-acc-78.03.pth","result.csv")
