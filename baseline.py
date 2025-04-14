@@ -163,7 +163,7 @@ class Config:
     checkpoints = './checkpoints'   # 自己创建一个文件夹用来储存权重
     pretrained = None 
     start_epoch = 0
-    epoches = 2
+    epoches = 20
     smooth = 0.1
     erase_prob = 0.5
 
