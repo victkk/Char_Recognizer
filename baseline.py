@@ -357,7 +357,7 @@ class DigitsViT(nn.Module):
         count = 0
         for child in vit.children():
             count += 1
-            if count < 4:
+            if count < 3:
                 for param in child.parameters():
                     param.requires_grad = False
         self.model_trans_top = nn.Sequential(*list(vit.children())[:-2])
@@ -448,9 +448,9 @@ class Trainer:
             self.train_set,
             batch_size=config.batch_size,
             shuffle=True,
-            num_workers=0,
+            num_workers=4,
             pin_memory=True,
-            # persistent_workers=True,
+            persistent_workers=True,
             drop_last=True,
             collate_fn=self.train_set.collect_fn,
         )
@@ -458,10 +458,10 @@ class Trainer:
             self.val_loader = DataLoader(
                 DigitsDataset(mode="val", aug=False),
                 batch_size=config.batch_size,
-                num_workers=0,
+                num_workers=4,
                 pin_memory=True,
                 drop_last=False,
-                # persistent_workers=True,
+                persistent_workers=True,
             )
         else:
             self.val_loader = None
@@ -572,7 +572,7 @@ class Trainer:
             corrects += t.all(temp, dim=1).sum().item()
 
             batch_acc = corrects * 100 / ((i + 1) * config.batch_size)
-            tbar.set_description("loss: %.3f, acc: %.3f" % (loss / (i + 1), batch_acc))
+            tbar.set_description("loss: %.6f, acc: %.3f" % (total_loss / (i + 1), batch_acc))
 
             # 定期记录batch训练信息到wandb
             if (i + 1) % config.print_interval == 0:
@@ -766,41 +766,42 @@ def predicts(model_path, csv_path):
     return results
 
 
-if __name__ == "__main__":
-    # 创建带时间戳的文件夹
-    config.model = "vit"
-    config.epoches = 17
-    config.scheduler_T0 = 50
-    # for freeze_layer_num in range(0, 10):
-    # config.freeze_layer_num = freeze_layer_num
-    save_dir = create_timestamped_folder(f"{config.model}", base_dir="result")
-    config.checkpoints = os.path.join(save_dir, "checkpoints")
-    # 初始化wandb
-    wandb.init(
-        project="digits-recognition",
-        name=f"{config.model}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-        config={
-            "model": config.model,
-            "batch_size": config.batch_size,
-            "learning_rate": config.lr,
-            "epochs": config.epoches,
-            "optimizer": "Adam",
-            "scheduler": config.scheduler,
-            "label_smoothing": config.smooth,
-            "pretrained": config.pretrained,
-            "freeze_layer_num": config.freeze_layer_num,
-            "class_num": config.class_num,
-        },
-    )
+# if __name__ == "__main__":
+#     # 创建带时间戳的文件夹
+#     config.model = "vit"
+#     config.epoches = 17
+#     config.scheduler_T0 = 50
+#     config.lr =0.001
+#     # for freeze_layer_num in range(0, 10):
+#     # config.freeze_layer_num = freeze_layer_num
+#     save_dir = create_timestamped_folder(f"{config.model}", base_dir="result")
+#     config.checkpoints = os.path.join(save_dir, "checkpoints")
+#     # 初始化wandb
+#     wandb.init(
+#         project="digits-recognition",
+#         name=f"{config.model}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+#         config={
+#             "model": config.model,
+#             "batch_size": config.batch_size,
+#             "learning_rate": config.lr,
+#             "epochs": config.epoches,
+#             "optimizer": "Adam",
+#             "scheduler": config.scheduler,
+#             "label_smoothing": config.smooth,
+#             "pretrained": config.pretrained,
+#             "freeze_layer_num": config.freeze_layer_num,
+#             "class_num": config.class_num,
+#         },
+#     )
 
-    # 训练模型
-    trainer = Trainer()
-    trainer.train()
+#     # 训练模型
+#     trainer = Trainer()
+#     trainer.train()
 
-    result_csv = os.path.join(save_dir, "result.csv")
-    predicts(trainer.best_checkpoint_path, result_csv)
+#     result_csv = os.path.join(save_dir, "result.csv")
+#     predicts(trainer.best_checkpoint_path, result_csv)
 
-    # 结束wandb会话
-    wandb.finish()
+#     # 结束wandb会话
+#     wandb.finish()
 
-# predicts("/data/zhangzicheng/workspace/study/Char_Recognizer/result/2025-04-14_12-47-15_freeze_6_resnet101/checkpoints/epoch-resnet50-33-acc-78.03.pth","result.csv")
+predicts("/data/zhangzicheng/workspace/study/Char_Recognizer/result/2025-04-14_12-47-15_freeze_6_resnet101/checkpoints/epoch-resnet50-33-acc-78.03.pth","result.csv")
