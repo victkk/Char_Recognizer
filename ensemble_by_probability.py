@@ -10,18 +10,13 @@ data_dir = {
     "submit_file": f"{dataset_path}/mchar_sample_submit_A.csv",
     
 }
-from baseline import DigitsResnet50,DigitsResnet101,DigitsDataset,DataLoader,parse2class,write2csv
+from baseline import DigitsResnet50,DigitsResnet101,DigitsDataset,DataLoader,DigitsInceptionResNetV2,DigitsInceptionV4,DigitsXception,DigitsViT,DigitsMobileNet,parse2class,write2csv
 import torch
 from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 from tqdm import tqdm
 model_paths = [
-    "/data/zhangzicheng/workspace/study/Char_Recognizer/result/2025-04-14_16-51-52_freeze_0_resnet101/checkpoints/epoch-resnet50-14-acc-78.50.pth",
-    "/data/zhangzicheng/workspace/study/Char_Recognizer/result/2025-04-14_17-17-58_freeze_1_resnet101/checkpoints/epoch-resnet50-16-acc-78.40.pth",
-    "/data/zhangzicheng/workspace/study/Char_Recognizer/result/2025-04-14_17-50-51_freeze_2_resnet101/checkpoints/epoch-resnet50-16-acc-78.43.pth",
-    "/data/zhangzicheng/workspace/study/Char_Recognizer/result/2025-04-14_18-11-33_freeze_3_resnet101/checkpoints/epoch-resnet50-16-acc-79.08.pth",
-    "/data/zhangzicheng/workspace/study/Char_Recognizer/result/2025-04-14_18-31-45_freeze_4_resnet101/checkpoints/epoch-resnet50-15-acc-78.99.pth",
-    "/data/zhangzicheng/workspace/study/Char_Recognizer/result/2025-04-14_18-57-36_freeze_5_resnet101/checkpoints/epoch-resnet50-16-acc-78.77.pth",
-    "/data/zhangzicheng/workspace/study/Char_Recognizer/result/2025-04-14_19-18-04_freeze_6_resnet101/checkpoints/epoch-resnet50-16-acc-78.01.pth"
+     "/data/zhangzicheng/workspace/study/Char_Recognizer/result/2025-04-14_18-11-33_freeze_3_resnet101/checkpoints/epoch-resnet50-16-acc-79.08.pth",
+    "/data/zhangzicheng/workspace/study/Char_Recognizer/result/2025-04-15_22-23-20_xception_freeze3/checkpoints/xception-epoch-16-acc-77.07.pth"
     ]
 
 
@@ -38,8 +33,22 @@ batch_pred = {}
 for index,model_path in enumerate(model_paths):
     if "resnet101" in model_path:
         res_net = DigitsResnet101().cuda()
-    else:
+    elif "resnet50" in model_path:
         res_net = DigitsResnet50().cuda()
+    elif "vit" in model_path:
+        res_net = DigitsViT().cuda()
+    elif "inception_v4" in model_path:
+        res_net = DigitsInceptionV4().cuda()
+    elif "inception_resnet_v2" in model_path:
+        res_net = DigitsInceptionResNetV2().cuda()
+    elif"xception" in model_path:
+        res_net = DigitsXception().cuda()
+    elif "mobilenet_v2" in model_path:
+        res_net = DigitsMobileNet(model_name='mobilenetv2_100').cuda()
+    elif "mobilenet_v3" in model_path:
+        res_net = DigitsMobileNet(model_name='mobilenetv3_large_100').cuda()
+    else:
+        raise NotImplementedError
 
     res_net.load_state_dict(torch.load(model_path)["model"])
     res_net.eval()

@@ -1,6 +1,6 @@
 dataset/*
 checkpoints/*
-result/*
+*.pth
 wandb/*
 __pycache__/*
 .vscode/*
