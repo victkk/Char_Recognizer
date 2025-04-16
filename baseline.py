@@ -1046,6 +1046,8 @@ def write2csv(results, csv_path):
     print("Results.saved to %s" % save_name)
 
 def predicts_tts(model_path, csv_path,tts_times=10):
+    csv_path = os.path.join(os.path.split(os.path.split(model_path)[0])[0], csv_path)
+    print(csv_path)
     # 初始化wandb以记录推理过程（如果还没有初始化）
     if wandb.run is None:
         wandb.init(
@@ -1055,7 +1057,7 @@ def predicts_tts(model_path, csv_path,tts_times=10):
         )
 
     test_loader = DataLoader(
-        DigitsDataset(mode="test", aug=True),
+        DigitsDataset(mode="test", aug=True if tts_times>1 else False),
         batch_size=config.batch_size,
         shuffle=False,
         num_workers=4,
@@ -1092,10 +1094,11 @@ def predicts_tts(model_path, csv_path,tts_times=10):
     if wandb.run is not None:
         wandb.watch(res_net, log="all", log_freq=100)
 
-    tbar = tqdm(test_loader)
+    
     res_net.eval()
     batch_pred = {}
     for index in range(tts_times):
+        tbar = tqdm(test_loader)
         with t.no_grad():
             for i, (img, img_names) in enumerate(tbar):
                 img = img.to(t.device("cuda"))
@@ -1112,11 +1115,11 @@ def predicts_tts(model_path, csv_path,tts_times=10):
         results += [[name, code] for name, code in zip(v[-1], result)]
 
     results = sorted(results, key=lambda x: x[0])
-    csv_path = f"./result.csv"
     write2csv(results, csv_path)
     return results
 def predicts(model_path, csv_path):
     # 初始化wandb以记录推理过程（如果还没有初始化）
+
     if wandb.run is None:
         wandb.init(
             project="digits-recognition-inference",
@@ -1208,41 +1211,41 @@ def find_line_with_content(content):
             if content in line:
                 lines.append(line.strip())
 
-if __name__ == "__main__":
-    # 创建带时间戳的文件夹
-    config.model = "resnet101"
-    config.epoches = 100
-    config.scheduler_T0 = 60
-    config.lr =0.0005
-    config.scheduler_eta_min = 0.0001
-    config.scheduler = "CosineAnnealingWarmRestarts"
-    config.pretrained = "result/2025-04-14_16-51-52_freeze_0_resnet101/checkpoints/epoch-resnet50-14-acc-78.50.pth"
-    # for freeze_layer_num in [4,8,12,16,2,6,10,14,]:
-    config.freeze_layer_num = 0
-    save_dir = create_timestamped_folder(f"{config.model}_freeze{config.freeze_layer_num}", base_dir="result")
-    config.checkpoints = os.path.join(save_dir, "checkpoints")
-    # 初始化wandb
-    config_dict = {}
-    for attr in dir(config):
-        if not attr.startswith('__'):
-            value = getattr(config, attr)
-            if not callable(value):
-                config_dict[attr] = value
-    config_dict["dataset"]=find_line_with_content("hook for dataset wandb")
-    wandb.init(
-        project="digits-recognition",
-        name=f"{config.model}_train+extra_val_freeze{config.freeze_layer_num}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-        config=config_dict
-    )
+# if __name__ == "__main__":
+#     # 创建带时间戳的文件夹
+#     config.model = "resnet101"
+#     config.epoches = 100
+#     config.scheduler_T0 = 60
+#     config.lr =0.0005
+#     config.scheduler_eta_min = 0.0001
+#     config.scheduler = "CosineAnnealingWarmRestarts"
+#     config.pretrained = "result/2025-04-14_16-51-52_freeze_0_resnet101/checkpoints/epoch-resnet50-14-acc-78.50.pth"
+#     # for freeze_layer_num in [4,8,12,16,2,6,10,14,]:
+#     config.freeze_layer_num = 0
+#     save_dir = create_timestamped_folder(f"{config.model}_freeze{config.freeze_layer_num}", base_dir="result")
+#     config.checkpoints = os.path.join(save_dir, "checkpoints")
+#     # 初始化wandb
+#     config_dict = {}
+#     for attr in dir(config):
+#         if not attr.startswith('__'):
+#             value = getattr(config, attr)
+#             if not callable(value):
+#                 config_dict[attr] = value
+#     config_dict["dataset"]=find_line_with_content("hook for dataset wandb")
+#     wandb.init(
+#         project="digits-recognition",
+#         name=f"{config.model}_train+extra_val_freeze{config.freeze_layer_num}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+#         config=config_dict
+#     )
 
-    # 训练模型
-    trainer = Trainer()
-    trainer.train()
+#     # 训练模型
+#     trainer = Trainer()
+#     trainer.train()
 
-    result_csv = os.path.join(save_dir, "result.csv")
-    predicts(trainer.best_checkpoint_path, result_csv)
+#     result_csv = os.path.join(save_dir, "result.csv")
+#     predicts(trainer.best_checkpoint_path, result_csv)
 
-    # 结束wandb会话
-    wandb.finish()
+#     # 结束wandb会话
+#     wandb.finish()
 
-predicts("result/2025-04-16_08-50-51_resnet101_freeze0/checkpoints/resnet101-epoch-7-acc-85.27.pth","8527-result.csv")
+predicts_tts("result/2025-04-14_14-39-18_freeze_0_resnet101/checkpoints/epoch-resnet50-13-acc-79.06.pth","result.csv",1)
