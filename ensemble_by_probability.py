@@ -61,7 +61,7 @@ for index,model_path in enumerate(model_paths):
                 batch_pred[i] =list(pred)+[img_names]#{batch_cnt:(tensor(64,11),tensor(64,11),tensor(64,11),tensor(64,11))}
             else:         
                 for digit in range(len(batch_pred[i])-1):
-                    batch_pred[i][digit] += pred[digit]
+                    batch_pred[i][digit] += pred[digit]*0.6
 results = []
 result = []
 for k,v in batch_pred.items():
@@ -69,7 +69,7 @@ for k,v in batch_pred.items():
     results += [[name, code] for name, code in zip(v[-1], result)]
 
 results = sorted(results, key=lambda x: x[0])
-csv_path = f"./result.csv"
+csv_path = f"./result6x10r.csv"
 write2csv(results, csv_path)
 
             

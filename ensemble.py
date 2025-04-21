@@ -12,6 +12,8 @@ csv_files = [
     'result/2025-04-14_18-57-36_freeze_5_resnet101/result.csv',
     'result/2025-04-14_19-18-04_freeze_6_resnet101/result.csv',
     'result/2025-04-15_22-29-55_inception_resnet_v2_freeze4/result.csv',
+    '/data/zhangzicheng/workspace/study/Char_Recognizer/other_code/tianchi-ocr/code/yolov5-master/submission-merge.csv',
+    '/data/zhangzicheng/workspace/study/Char_Recognizer/other_code/tianchi-ocr/code/yolov5-master/submission-merge.csv',
     '/data/zhangzicheng/workspace/study/Char_Recognizer/result/2025-04-15_22-01-34_xception_freeze0/result.csv',
     '/data/zhangzicheng/workspace/study/Char_Recognizer/result/2025-04-15_22-23-20_xception_freeze3/result.csv',
     "/data/zhangzicheng/workspace/study/Char_Recognizer/result/2025-04-15_22-34-59_xception_freeze6/result.csv"

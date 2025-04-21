@@ -68,10 +68,10 @@ if __name__ == "__main__":
     # 构建数据集路径索引
 dataset_path = "./dataset"
 data_dir = {
-    "train_data": f"{dataset_path}/svhn_train/",
+    "train_data": f"{dataset_path}/mchar_train/",
     "val_data": f"{dataset_path}/mchar_val/",
     "test_data": f"{dataset_path}/mchar_test_a/",
-    "train_label": f"{dataset_path}/svhn_train.json",
+    "train_label": f"{dataset_path}/mchar_train.json",
     "val_label": f"{dataset_path}/mchar_val.json",
     "extra_data": f"{dataset_path}/mchar_extra/",
     "extra_label": f"{dataset_path}/mchar_extra.json",
@@ -356,7 +356,6 @@ class DigitsDataset(Dataset):
         self.batch_count += 1
         return t.stack(imgs).float(), t.stack(labels)
 
-
 class DigitsResnet101(nn.Module):
     def __init__(self, class_num=11):
         super(DigitsResnet101, self).__init__()
@@ -534,7 +533,6 @@ class DigitsXception(nn.Module):
         # 移除分类层
         # self.net.global_pool = nn.Identity()
         self.net.fc = nn.Identity()
-        
         ct = 0
         for name, child in self.net.named_children():
             ct += 1
@@ -703,16 +701,16 @@ class Trainer:
         if val:
             # all_set = DigitsDataset(mode="train")#  + DigitsDataset(mode="val")  # hook for dataset wandb 
             # self.train_set, self.val_set = all_set.split(train_ratio=0.9)
-            self.train_set = DigitsDataset(mode="train")+DigitsDataset(mode="extra") 
+            self.train_set = DigitsDataset(mode="train")# +DigitsDataset(mode="extra") 
             # print(len(self.train_set))
-            self.val_set = DigitsDataset(mode="val") # hook for dataset wandb
+            self.val_set = DigitsDataset(mode="val",aug=False) # hook for dataset wandb
             # self.val_set.aug = False 
             
             self.train_loader = DataLoader(
                 self.train_set,
                 batch_size=config.batch_size,
                 shuffle=True,
-                num_workers=8,
+                num_workers=4,
                 pin_memory=True,
                 persistent_workers=True,
                 drop_last=True,
@@ -825,16 +823,16 @@ class Trainer:
                         wandb.log({"val_acc": acc * 100, "epoch": epoch})
 
                     # 保存最优模型
-                    # if acc > self.best_acc:
-                    os.makedirs(config.checkpoints, exist_ok=True)
-                    save_path = os.path.join(
-                        config.checkpoints,
-                        "%s-epoch-%d-acc-%.2f.pth" % (config.model, epoch + 1, acc * 100),
-                    )
-                    self.save_model(save_path)
-                    print("%s saved successfully..." % save_path)
-                    self.best_acc = acc
-                    self.best_checkpoint_path = save_path
+                    if acc > self.best_acc:
+                        os.makedirs(config.checkpoints, exist_ok=True)
+                        save_path = os.path.join(
+                            config.checkpoints,
+                            "%s-epoch-%d-acc-%.2f.pth" % (config.model, epoch + 1, acc * 100),
+                        )
+                        self.save_model(save_path)
+                        print("%s saved successfully..." % save_path)
+                        self.best_acc = acc
+                        self.best_checkpoint_path = save_path
 
     def train_epoch(self, epoch):
         total_loss = 0
@@ -1211,41 +1209,41 @@ def find_line_with_content(content):
             if content in line:
                 lines.append(line.strip())
 
-# if __name__ == "__main__":
-#     # 创建带时间戳的文件夹
-#     config.model = "resnet101"
-#     config.epoches = 100
-#     config.scheduler_T0 = 60
-#     config.lr =0.0005
-#     config.scheduler_eta_min = 0.0001
-#     config.scheduler = "CosineAnnealingWarmRestarts"
-#     config.pretrained = "result/2025-04-14_16-51-52_freeze_0_resnet101/checkpoints/epoch-resnet50-14-acc-78.50.pth"
-#     # for freeze_layer_num in [4,8,12,16,2,6,10,14,]:
-#     config.freeze_layer_num = 0
-#     save_dir = create_timestamped_folder(f"{config.model}_freeze{config.freeze_layer_num}", base_dir="result")
-#     config.checkpoints = os.path.join(save_dir, "checkpoints")
-#     # 初始化wandb
-#     config_dict = {}
-#     for attr in dir(config):
-#         if not attr.startswith('__'):
-#             value = getattr(config, attr)
-#             if not callable(value):
-#                 config_dict[attr] = value
-#     config_dict["dataset"]=find_line_with_content("hook for dataset wandb")
-#     wandb.init(
-#         project="digits-recognition",
-#         name=f"{config.model}_train+extra_val_freeze{config.freeze_layer_num}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-#         config=config_dict
-#     )
+if __name__ == "__main__":
+    # 创建带时间戳的文件夹
+    config.model = "resnet101"
+    config.epoches = 13
+    config.scheduler_T0 = 40
+    config.lr =0.001
+    config.scheduler_eta_min = 0.0
+    config.scheduler = "CosineAnnealingWarmRestarts"
+    # config.pretrained = "result/2025-04-14_16-51-52_freeze_0_resnet101/checkpoints/epoch-resnet50-14-acc-78.50.pth"
+    # for freeze_layer_num in [4,8,12,16,2,6,10,14,]:
+    config.freeze_layer_num = 3
+    save_dir = create_timestamped_folder(f"{config.model}_freeze{config.freeze_layer_num}", base_dir="result")
+    config.checkpoints = os.path.join(save_dir, "checkpoints")
+    # 初始化wandb
+    config_dict = {}
+    for attr in dir(config):
+        if not attr.startswith('__'):
+            value = getattr(config, attr)
+            if not callable(value):
+                config_dict[attr] = value
+    config_dict["dataset"]=find_line_with_content("hook for dataset wandb")
+    wandb.init(
+        project="digits-recognition",
+        name=f"{config.model}_originalsetup_train_val_freeze{config.freeze_layer_num}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+        config=config_dict
+    )
 
-#     # 训练模型
-#     trainer = Trainer()
-#     trainer.train()
+    # 训练模型
+    trainer = Trainer()
+    trainer.train()
 
-#     result_csv = os.path.join(save_dir, "result.csv")
-#     predicts(trainer.best_checkpoint_path, result_csv)
+    result_csv = os.path.join(save_dir, "result.csv")
+    predicts(trainer.best_checkpoint_path, result_csv)
 
-#     # 结束wandb会话
-#     wandb.finish()
+    # 结束wandb会话
+    wandb.finish()
 
-predicts_tts("result/2025-04-14_14-39-18_freeze_0_resnet101/checkpoints/epoch-resnet50-13-acc-79.06.pth","result.csv",1)
+# predicts_tts("result/2025-04-14_14-39-18_freeze_0_resnet101/checkpoints/epoch-resnet50-13-acc-79.06.pth","result.csv",1)
