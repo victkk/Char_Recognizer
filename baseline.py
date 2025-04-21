@@ -17,7 +17,7 @@ from tqdm.auto import tqdm
 from torchvision import transforms
 from torchvision.utils import save_image, make_grid
 from torch.optim import SGD
-from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts, MultiStepLR
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts,CosineAnnealingLR, MultiStepLR
 from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 import pandas as pd
 import numpy as np
@@ -30,7 +30,7 @@ from torchsummary import summary
 import random
 from torch.optim import Adam
 import torchvision.models as models
-
+import timm
 # 导入wandb进行实验跟踪
 import wandb
 from datetime import datetime
@@ -66,21 +66,25 @@ if __name__ == "__main__":
     #     shutil.rmtree(os.path.join(dataset_path,'__MACOSX'))
 
     # 构建数据集路径索引
-    data_dir = {
-        "train_data": f"{dataset_path}/mchar_train/",
-        "val_data": f"{dataset_path}/mchar_val/",
-        "test_data": f"{dataset_path}/mchar_test_a/",
-        "train_label": f"{dataset_path}/mchar_train.json",
-        "val_label": f"{dataset_path}/mchar_val.json",
-        "submit_file": f"{dataset_path}/mchar_sample_submit_A.csv",
-    }
+dataset_path = "./dataset"
+data_dir = {
+    "train_data": f"{dataset_path}/mchar_train/",
+    "val_data": f"{dataset_path}/mchar_val/",
+    "test_data": f"{dataset_path}/mchar_test_a/",
+    "train_label": f"{dataset_path}/mchar_train.json",
+    "val_label": f"{dataset_path}/mchar_val.json",
+    "extra_data": f"{dataset_path}/mchar_extra/",
+    "extra_label": f"{dataset_path}/mchar_extra.json",
+    "submit_file": f"{dataset_path}/mchar_sample_submit_A.csv",
+    
+}
 
-    train_list = glob(data_dir["train_data"] + "*.png")
-    test_list = glob(data_dir["test_data"] + "*.png")
-    val_list = glob(data_dir["val_data"] + "*.png")
-    print("train image counts: %d" % len(train_list))
-    print("val image counts: %d" % len(val_list))
-    print("test image counts: %d" % len(test_list))
+# train_list = glob(data_dir["train_data"] + "*.png")
+# test_list = glob(data_dir["test_data"] + "*.png")
+# val_list = glob(data_dir["val_data"] + "*.png")
+# print("train image counts: %d" % len(train_list))
+# print("val image counts: %d" % len(val_list))
+# print("test image counts: %d" % len(test_list))
 
 
 # 看train数据集第一张的信息，长宽高等
@@ -215,7 +219,7 @@ class Config:
     model = "resnet101"
     freeze_layer_num = 6
     scheduler = "CosineAnnealingWarmRestarts"
-    scheduler_T0 = 40
+    scheduler_T0 = 12
     scheduler_Tmult = 2
     scheduler_eta_min = 0
 
@@ -231,8 +235,8 @@ class DigitsDataset(Dataset):
       label_path(string): label path
       aug(bool): wheather do image augmentation, default: True
     """
-
-    def __init__(self, mode="train", size=(128, 256), aug=True):
+    
+    def __init__(self, mode="train", size=(128, 256),imgs = None, aug=True):
         super(DigitsDataset, self).__init__()
         self.aug = aug
         self.size = size
@@ -243,18 +247,49 @@ class DigitsDataset(Dataset):
             self.trans_transform = ViTFeatureExtractor.from_pretrained(
                 "google/vit-large-patch16-224"
             )
-        if mode == "test":
-            self.imgs = glob(data_dir["test_data"] + "*.png")
-            self.labels = None
+        if imgs is None:
+            if mode == "test":
+                self.imgs = glob(data_dir["test_data"] + "*.png")
+                self.labels = None
+            elif mode == "val":
+                labels = json.load(open(data_dir["%s_label" % mode], "r"))
+                imgs = glob(data_dir["%s_data" % mode] + "*.png") 
+                self.imgs = [
+                    (img, labels[os.path.split(img)[-1]])
+                    for img in imgs
+                    if os.path.split(img)[-1] in labels
+                ]
+            elif mode == "train":
+                labels_train = json.load(open(data_dir["%s_label" % mode], "r"))
+                train_imgs = glob(data_dir["train_data" ] + "*.png") 
+                self.imgs = [
+                    (img, labels_train[os.path.split(img)[-1]])
+                    for img in train_imgs
+                    if os.path.split(img)[-1] in labels_train
+                ]
+            elif mode == "extra":
+                labels_extra = json.load(open(data_dir["extra_label"], "r"))
+                extra_imgs = glob(data_dir["extra_data"] + "*.png")
+                self.imgs = [
+                    (img, labels_extra[os.path.split(img)[-1]])
+                    for img in extra_imgs
+                    if os.path.split(img)[-1] in labels_extra
+                ]
         else:
-            labels = json.load(open(data_dir["%s_label" % mode], "r"))
-            imgs = glob(data_dir["%s_data" % mode] + "*.png")
-            self.imgs = [
-                (img, labels[os.path.split(img)[-1]])
-                for img in imgs
-                if os.path.split(img)[-1] in labels
-            ]
-
+            self.imgs = imgs  
+            
+    def __add__(self, other:'DigitsDataset'):
+        
+        return DigitsDataset(imgs=self.imgs + other.imgs,mode=self.mode,size=self.size,aug=self.aug)
+    def __matmul__(self, num:int):
+        if(num>len(self)):
+            raise ValueError("num should be less than the length of dataset")
+        random.shuffle(self.imgs)
+        return DigitsDataset(imgs=self.imgs[:num],mode=self.mode,size=self.size,aug=self.aug)
+    def split(self,train_ratio=0.8):
+        random.shuffle(self.imgs)
+        train_num = int(len(self.imgs)*train_ratio)
+        return DigitsDataset(imgs=self.imgs[:train_num],mode=self.mode,size=self.size,aug=self.aug),DigitsDataset(imgs=self.imgs[train_num:],mode=self.mode,size=self.size,aug=self.aug)
     def __getitem__(self, idx):
         if self.mode != "test":
             img, label = self.imgs[idx]
@@ -321,7 +356,6 @@ class DigitsDataset(Dataset):
         self.batch_count += 1
         return t.stack(imgs).float(), t.stack(labels)
 
-
 class DigitsResnet101(nn.Module):
     def __init__(self, class_num=11):
         super(DigitsResnet101, self).__init__()
@@ -348,38 +382,257 @@ class DigitsResnet101(nn.Module):
         c4 = self.fc4(feat)
         return c1, c2, c3, c4
 
+# class DigitsInceptionV3(nn.Module):
+#     def __init__(self, class_num=11):
+#         super(DigitsInceptionV3, self).__init__()
+#         self.net = models.inception_v3(weights="IMAGENET1K_V1")
+#         # 禁用辅助分类器
+#         self.net.aux_logits = False
+#         # 移除最后的分类层
+#         self.net.fc = nn.Identity()
+        
+#         ct = 0
+#         for child in self.net.children():
+#             ct += 1
+#             if ct < config.freeze_layer_num:
+#                 for param in child.parameters():
+#                     param.requires_grad = False
+        
+#         self.cnn = self.net
+#         # InceptionV3特征维度是2048
+#         self.fc1 = nn.Linear(2048, class_num)
+#         self.fc2 = nn.Linear(2048, class_num)
+#         self.fc3 = nn.Linear(2048, class_num)
+#         self.fc4 = nn.Linear(2048, class_num)
 
-class DigitsViT(nn.Module):
-    def __init__(self, class_num=11, dp_rate=0):
-        super(DigitsViT, self).__init__()
-        vit = ViTModel.from_pretrained("google/vit-base-patch16-224-in21k")
-
-        count = 0
-        for child in vit.children():
-            count += 1
-            if count < 4:
+#     def forward(self, img):
+#         feat = self.cnn(img)
+#         feat = feat.view(feat.shape[0], -1)
+#         c1 = self.fc1(feat)
+#         c2 = self.fc2(feat)
+#         c3 = self.fc3(feat)
+#         c4 = self.fc4(feat)
+#         return c1, c2, c3, c4
+class DigitsInceptionResNetV2(nn.Module):
+    def __init__(self, class_num=11):
+        super(DigitsInceptionResNetV2, self).__init__()
+        # 使用timm库加载InceptionResNetV2
+        self.net = timm.create_model('inception_resnet_v2', pretrained=True)
+        # 移除分类层
+        # self.net.global_pool = nn.Identity()
+        self.net.classif = nn.Identity()
+        
+        ct = 0
+        for name, child in self.net.named_children():
+            ct += 1
+            if ct < config.freeze_layer_num:
                 for param in child.parameters():
                     param.requires_grad = False
-        self.model_trans_top = nn.Sequential(*list(vit.children())[:-2])
-        self.trans_layer_norm = list(vit.children())[2]
-        self.trans_flatten = nn.Flatten()
-        self.trans_linear = nn.Linear(150528, 2048)
-        self.dropout = nn.Dropout(dp_rate)
+        print(ct) # 18
+        self.cnn = self.net
+        # InceptionResNetV2特征维度是1536
+        self.fc1 = nn.Linear(1536, class_num)
+        self.fc2 = nn.Linear(1536, class_num)
+        self.fc3 = nn.Linear(1536, class_num)
+        self.fc4 = nn.Linear(1536, class_num)
+
+    def forward(self, img):
+        feat = self.cnn(img)
+        feat = feat.view(feat.shape[0], -1)
+        c1 = self.fc1(feat)
+        c2 = self.fc2(feat)
+        c3 = self.fc3(feat)
+        c4 = self.fc4(feat)
+        return c1, c2, c3, c4
+class DigitsMobileNet(nn.Module):
+    def __init__(self, class_num=11, model_name='mobilenetv3_large_100'):
+        super(DigitsMobileNet, self).__init__()
+        # 使用timm库加载MobileNet
+        self.net = timm.create_model(model_name, pretrained=True)
+        
+        # 移除分类层，保留特征提取部分
+        if hasattr(self.net, 'classifier'):
+            self.net.classifier = nn.Identity()
+        elif hasattr(self.net, 'head'):
+            self.net.head = nn.Identity()
+        
+        # 冻结指定层数
+        ct = 0
+        for name, child in self.net.named_children():
+            ct += 1
+            if ct < config.freeze_layer_num:
+                for param in child.parameters():
+                    param.requires_grad = False
+        print("total_layers:", ct)
+        # 确定特征维度
+        feature_dim = 1280  # MobileNetV2/V3 Large的特征维度
+        if 'mobilenetv3_small' in model_name:
+            feature_dim = 576  # MobileNetV3 Small的特征维度
+        
+        # 四个数字的分类层
+        self.cnn = self.net
+        self.fc1 = nn.Linear(feature_dim, class_num)
+        self.fc2 = nn.Linear(feature_dim, class_num)
+        self.fc3 = nn.Linear(feature_dim, class_num)
+        self.fc4 = nn.Linear(feature_dim, class_num)
+
+    def forward(self, img):
+        feat = self.cnn(img)  # 已经经过全局池化，得到特征向量
+        c1 = self.fc1(feat)
+        c2 = self.fc2(feat)
+        c3 = self.fc3(feat)
+        c4 = self.fc4(feat)
+        return c1, c2, c3, c4
+# class DigitsViT(nn.Module):
+#     def __init__(self, class_num=11, model_name='vit_huge_patch16_224'):
+#         super(DigitsViT, self).__init__()
+#         # 使用timm库加载ViT
+#         self.net = timm.create_model(model_name, pretrained=True)
+        
+#         # 移除分类头，只保留特征提取部分
+#         self.net.head = nn.Identity()
+        
+#         # 冻结指定层数
+#         ct = 0
+#         for name, child in self.net.named_children():
+#             ct += 1
+#             if ct < config.freeze_layer_num:
+#                 for param in child.parameters():
+#                     param.requires_grad = False
+        
+#         # 确定特征维度 - 根据ViT变体不同而异
+#         if 'base' in model_name:
+#             feature_dim = 768
+#         elif 'large' in model_name:
+#             feature_dim = 1024
+#         elif 'huge' in model_name:
+#             feature_dim = 1280
+#         else:
+#             feature_dim = 768  # 默认值
+        
+#         # 四个数字的分类层
+#         self.transformer = self.net
+#         self.fc1 = nn.Linear(feature_dim, class_num)
+#         self.fc2 = nn.Linear(feature_dim, class_num)
+#         self.fc3 = nn.Linear(feature_dim, class_num)
+#         self.fc4 = nn.Linear(feature_dim, class_num)
+
+#     def forward(self, img):
+#         feat = self.transformer(img)  # 获取CLS token特征
+#         c1 = self.fc1(feat)
+#         c2 = self.fc2(feat)
+#         c3 = self.fc3(feat)
+#         c4 = self.fc4(feat)
+#         return c1, c2, c3, c4
+
+class DigitsXception(nn.Module):
+    def __init__(self, class_num=11):
+        super(DigitsXception, self).__init__()
+        # 使用timm库加载Xception
+        self.net = timm.create_model('xception', pretrained=True)
+        # 移除分类层
+        # self.net.global_pool = nn.Identity()
+        self.net.fc = nn.Identity()
+        ct = 0
+        for name, child in self.net.named_children():
+            ct += 1
+            if ct < config.freeze_layer_num:
+                for param in child.parameters():
+                    param.requires_grad = False
+        print(ct) # 26
+        self.cnn = self.net
+        # Xception特征维度是2048
         self.fc1 = nn.Linear(2048, class_num)
         self.fc2 = nn.Linear(2048, class_num)
         self.fc3 = nn.Linear(2048, class_num)
         self.fc4 = nn.Linear(2048, class_num)
 
     def forward(self, img):
-        result_trans = self.model_trans_top(img)
-        patch_state = result_trans.last_hidden_state[
-            :, 1:, :
-        ]  # Remove the classification token and get the last hidden state of all patchs
-        result_trans = self.trans_layer_norm(patch_state)
-        result_trans = self.trans_flatten(patch_state)
-        result_trans = self.dropout(result_trans)
-        result_trans = self.trans_linear(result_trans)
-        feat = self.dropout(result_trans)
+        feat = self.cnn(img)
+        feat = feat.view(feat.shape[0], -1)
+        c1 = self.fc1(feat)
+        c2 = self.fc2(feat)
+        c3 = self.fc3(feat)
+        c4 = self.fc4(feat)
+        return c1, c2, c3, c4
+
+
+class DigitsInceptionV4(nn.Module):
+    def __init__(self, class_num=11):
+        super(DigitsInceptionV4, self).__init__()
+        # 加载预训练的InceptionV4模型
+        self.net = timm.create_model('inception_v4', pretrained=True)
+        
+        # 移除最后的分类层，只保留特征提取部分
+        self.net.global_pool = nn.Identity()
+        self.net.last_linear = nn.Identity()
+        
+        # 冻结指定层数的参数
+        ct = 0
+        for name, child in self.net.named_children():
+            ct += 1
+            if ct < config.freeze_layer_num:
+                for param in child.parameters():
+                    param.requires_grad = False
+        print(ct)
+        self.cnn = self.net
+        # InceptionV4的特征输出是1536维
+        self.fc1 = nn.Linear(1536, class_num)
+        self.fc2 = nn.Linear(1536, class_num)
+        self.fc3 = nn.Linear(1536, class_num)
+        self.fc4 = nn.Linear(1536, class_num)
+
+    def forward(self, img):
+        # 提取特征
+        feat = self.cnn(img)
+        # 将特征展平
+        feat = feat.view(feat.shape[0], -1)
+        # 通过四个不同的全连接层得到四个分类结果
+        c1 = self.fc1(feat)
+        c2 = self.fc2(feat)
+        c3 = self.fc3(feat)
+        c4 = self.fc4(feat)
+        return c1, c2, c3, c4
+
+    
+class DigitsViT(nn.Module):
+    def __init__(self, class_num=11, dp_rate=0):
+        raise NotImplementedError
+        super(DigitsViT, self).__init__()
+        self.vit = ViTModel.from_pretrained("google/vit-base-patch16-224-in21k")
+
+        count = 0
+        for child in self.vit.children():
+            count += 1
+            if count < 5:
+                for param in child.parameters():
+                    param.requires_grad = False
+        # self.model_trans_top = nn.Sequential(*list(vit.children())[:-2])
+        # self.trans_layer_norm = list(vit.children())[2]
+        # self.trans_flatten = nn.Flatten()
+        # self.trans_linear = nn.Linear(150528, 2048)
+        # self.dropout = nn.Dropout(dp_rate)
+        # self.fc1 = nn.Linear(2048, class_num)
+        # self.fc2 = nn.Linear(2048, class_num)
+        # self.fc3 = nn.Linear(2048, class_num)
+        # self.fc4 = nn.Linear(2048, class_num)
+        self.fc1 = nn.Linear(self.vit.config.hidden_size, class_num)
+        
+        self.fc2 = nn.Linear(self.vit.config.hidden_size, class_num)
+        
+        self.fc3 = nn.Linear(self.vit.config.hidden_size, class_num)
+        
+        self.fc4 = nn.Linear(self.vit.config.hidden_size, class_num)
+    def forward(self, img):
+        feat = self.vit(img)    
+        # patch_state = result_trans.last_hidden_state[
+        #     :, 1:, :
+        # ]  # Remove the classification token and get the last hidden state of all patchs
+        # result_trans = self.trans_layer_norm(patch_state)
+        # result_trans = self.trans_flatten(result_trans)
+        # result_trans = self.dropout(result_trans)
+        # result_trans = self.trans_linear(result_trans)
+        # feat = self.dropout(result_trans)
         c1 = self.fc1(feat)
         c2 = self.fc2(feat)
         c3 = self.fc3(feat)
@@ -443,34 +696,66 @@ class LabelSmoothEntropy(nn.Module):
 class Trainer:
     def __init__(self, val=True):
         self.device = t.device("cuda") if t.cuda.is_available() else t.device("cpu")
-        self.train_set = DigitsDataset(mode="train")
-        self.train_loader = DataLoader(
-            self.train_set,
-            batch_size=config.batch_size,
-            shuffle=True,
-            num_workers=0,
-            pin_memory=True,
-            # persistent_workers=True,
-            drop_last=True,
-            collate_fn=self.train_set.collect_fn,
-        )
+        
+        
         if val:
-            self.val_loader = DataLoader(
-                DigitsDataset(mode="val", aug=False),
+            # all_set = DigitsDataset(mode="train")#  + DigitsDataset(mode="val")  # hook for dataset wandb 
+            # self.train_set, self.val_set = all_set.split(train_ratio=0.9)
+            self.train_set = DigitsDataset(mode="train")# +DigitsDataset(mode="extra") 
+            # print(len(self.train_set))
+            self.val_set = DigitsDataset(mode="val",aug=False) # hook for dataset wandb
+            # self.val_set.aug = False 
+            
+            self.train_loader = DataLoader(
+                self.train_set,
                 batch_size=config.batch_size,
-                num_workers=0,
+                shuffle=True,
+                num_workers=4,
+                pin_memory=True,
+                persistent_workers=True,
+                drop_last=True,
+                collate_fn=self.train_set.collect_fn,
+            )
+            self.val_loader = DataLoader(
+                self.val_set,
+                batch_size=config.batch_size,
+                num_workers=8,
+                shuffle=False,
                 pin_memory=True,
                 drop_last=False,
-                # persistent_workers=True,
+                persistent_workers=True,
             )
         else:
-            self.val_loader = None
+            raise NotImplementedError
+            # all_set = DigitsDataset(mode="train") + DigitsDataset(mode="val")
+            # self.train_loader = DataLoader(
+            #     self.train_set,
+            #     batch_size=config.batch_size,
+            #     shuffle=True,
+            #     num_workers=8,
+            #     pin_memory=True,
+            #     persistent_workers=True,
+            #     drop_last=True,
+            #     collate_fn=self.train_set.collect_fn,
+            # )
+            # self.val_loader = None
+            
         if config.model == "resnet101":
             self.model = DigitsResnet101(config.class_num).to(self.device)
         elif config.model == "resnet50":
             self.model = DigitsResnet50(config.class_num).to(self.device)
         elif config.model == "vit":
-            self.model = DigitsViT(config.class_num, dp_rate=0.1).to(self.device)
+            self.model = DigitsViT(config.class_num).to(self.device)
+        elif config.model == "xception":
+            self.model = DigitsXception(config.class_num).to(self.device)
+        elif config.model == "inception_v4":
+            self.model = DigitsInceptionV4(config.class_num).to(self.device)
+        elif config.model == "inception_resnet_v2":
+            self.model = DigitsInceptionResNetV2(config.class_num).to(self.device)
+        elif config.model == "mobilenet_v2":
+            self.model = DigitsMobileNet(config.class_num,model_name='mobilenetv2_100').to(self.device)
+        elif config.model == "mobilenet_v3":
+            self.model = DigitsMobileNet(config.class_num,model_name='mobilenetv3_large_100').to(self.device)
         else:
             RuntimeError("No such model")
         self.criterion = LabelSmoothEntropy().to(self.device)
@@ -482,12 +767,23 @@ class Trainer:
             weight_decay=0,
             amsgrad=False,
         )
-        self.lr_scheduler = CosineAnnealingWarmRestarts(
+        if config.scheduler == "CosineAnnealingWarmRestarts":
+            self.lr_scheduler = CosineAnnealingWarmRestarts(
             self.optimizer,
             T_0=config.scheduler_T0,
             T_mult=config.scheduler_Tmult,
             eta_min=config.scheduler_eta_min,
         )
+        elif config.scheduler =="CosineAnnealingLR":
+            self.lr_scheduler = CosineAnnealingLR(
+            self.optimizer,
+            T_max=config.scheduler_T0,
+            eta_min=config.scheduler_eta_min,
+        )
+        else:
+            raise NotImplementedError
+        self.best_acc = 0
+        self.best_checkpoint_path = ""
         self.best_acc = 0
         self.best_checkpoint_path = ""
         # 是否载入预训练模型
@@ -495,8 +791,8 @@ class Trainer:
             self.load_model(config.pretrained)
             # print('Load model from %s'%config.pretrained)
             if self.val_loader is not None:
-                acc = self.eval()
-            self.best_acc = acc
+                acc = self.eval_tts(6)
+            # self.best_acc = acc
             print("Load model from %s, Eval Acc: %.2f" % (config.pretrained, acc * 100))
             # 记录预训练模型的验证准确率
             if wandb.run is not None:
@@ -531,7 +827,7 @@ class Trainer:
                         os.makedirs(config.checkpoints, exist_ok=True)
                         save_path = os.path.join(
                             config.checkpoints,
-                            "epoch-resnet50-%d-acc-%.2f.pth" % (epoch + 1, acc * 100),
+                            "%s-epoch-%d-acc-%.2f.pth" % (config.model, epoch + 1, acc * 100),
                         )
                         self.save_model(save_path)
                         print("%s saved successfully..." % save_path)
@@ -572,7 +868,7 @@ class Trainer:
             corrects += t.all(temp, dim=1).sum().item()
 
             batch_acc = corrects * 100 / ((i + 1) * config.batch_size)
-            tbar.set_description("loss: %.3f, acc: %.3f" % (loss / (i + 1), batch_acc))
+            tbar.set_description("loss: %.6f, acc: %.3f" % (total_loss / (i + 1), batch_acc))
 
             # 定期记录batch训练信息到wandb
             if (i + 1) % config.print_interval == 0:
@@ -593,6 +889,62 @@ class Trainer:
         # 返回整个epoch的训练准确率
         return corrects * 100 / ((i + 1) * config.batch_size)
 
+    def eval_tts(self,cnt=6):
+        self.model.eval()
+
+
+        with t.no_grad():
+            
+            batch_pred = {}
+            for index in range(cnt):
+                corrects = 0
+                total_samples = 0
+                tbar = tqdm(self.val_loader)
+                for i, (img, label) in enumerate(tbar):
+                    img = img.to(self.device)
+                    label = label.to(self.device)
+                    pred = self.model(img)
+                    if index==0:
+                        batch_pred[i] =list(pred)+[label]#{batch_cnt:(tensor(64,11),tensor(64,11),tensor(64,11),tensor(64,11))}
+                    else:         
+                        for digit in range(len(batch_pred[i])-1):
+                            batch_pred[i][digit] += pred[digit]
+                    # 计算准确率
+                    temp = t.stack(
+                        [
+                            pred[0].argmax(1) == label[:, 0],
+                            pred[1].argmax(1) == label[:, 1],
+                            pred[2].argmax(1) == label[:, 2],
+                            pred[3].argmax(1) == label[:, 3],
+                        ],
+                        dim=1,
+                    )
+                    batch_corrects = t.all(temp, dim=1).sum().item()
+                    corrects += batch_corrects
+                    total_samples += label.shape[0]
+                    tbar.set_description("Val Acc: %.2f" % (corrects * 100 / total_samples))
+            corrects = 0
+            total_samples = 0
+            tbar = tqdm(batch_pred.items())
+            for i,batch_result in tbar:
+                ch1, ch2, ch3, ch4, label = batch_result
+                ch1, ch2, ch3, ch4 = ch1.argmax(1), ch2.argmax(1), ch3.argmax(1), ch4.argmax(1)
+                temp = t.stack(
+                    [
+                        ch1 == label[:, 0],
+                        ch2 == label[:, 1],
+                        ch3 == label[:, 2],
+                        ch4 == label[:, 3],
+                    ],
+                    dim=1,
+                )
+                batch_corrects = t.all(temp, dim=1).sum().item()
+                corrects += batch_corrects
+                total_samples += label.shape[0]
+                tbar.set_description("Val Acc: %.2f" % (corrects * 100 / total_samples))
+        self.model.train()
+        return corrects / total_samples
+    
     def eval(self):
         self.model.eval()
         corrects = 0
@@ -604,7 +956,7 @@ class Trainer:
                 img = img.to(self.device)
                 label = label.to(self.device)
                 pred = self.model(img)
-
+                
                 # 计算准确率
                 temp = t.stack(
                     [
@@ -691,9 +1043,81 @@ def write2csv(results, csv_path):
     df.to_csv(save_name, sep=",", index=None)
     print("Results.saved to %s" % save_name)
 
+def predicts_tts(model_path, csv_path,tts_times=10):
+    csv_path = os.path.join(os.path.split(os.path.split(model_path)[0])[0], csv_path)
+    print(csv_path)
+    # 初始化wandb以记录推理过程（如果还没有初始化）
+    if wandb.run is None:
+        wandb.init(
+            project="digits-recognition-inference",
+            name=f"inference_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            config={"model_path": model_path},
+        )
 
+    test_loader = DataLoader(
+        DigitsDataset(mode="test", aug=True if tts_times>1 else False),
+        batch_size=config.batch_size,
+        shuffle=False,
+        num_workers=4,
+        pin_memory=True,
+        drop_last=False,
+        persistent_workers=True,
+    )
+    results = []
+    res_path = model_path
+
+    # 根据模型路径判断使用哪个模型架构
+    if "resnet101" in model_path:
+        res_net = DigitsResnet101().cuda()
+    elif "resnet50" in model_path:
+        res_net = DigitsResnet50().cuda()
+    elif "vit" in model_path:
+        res_net = DigitsViT().cuda()
+    elif "inception_v4" in model_path:
+        res_net = DigitsInceptionV4().cuda()
+    elif "inception_resnet_v2" in model_path:
+        res_net = DigitsInceptionResNetV2().cuda()
+    elif"xception" in model_path:
+        res_net = DigitsXception().cuda()
+    elif "mobilenet_v2" in model_path:
+        res_net = DigitsMobileNet(model_name='mobilenetv2_100').cuda()
+    elif "mobilenet_v3" in model_path:
+        res_net = DigitsMobileNet(model_name='mobilenetv3_large_100').cuda()
+    else:
+        raise NotImplementedError
+    res_net.load_state_dict(t.load(res_path)["model"])
+    print("Load model from %s successfully" % model_path)
+
+    # 记录模型结构到wandb
+    if wandb.run is not None:
+        wandb.watch(res_net, log="all", log_freq=100)
+
+    
+    res_net.eval()
+    batch_pred = {}
+    for index in range(tts_times):
+        tbar = tqdm(test_loader)
+        with t.no_grad():
+            for i, (img, img_names) in enumerate(tbar):
+                img = img.to(t.device("cuda"))
+                pred = res_net(img)
+                if index==0:
+                    batch_pred[i] =list(pred)+[img_names]#{batch_cnt:(tensor(64,11),tensor(64,11),tensor(64,11),tensor(64,11))}
+                else:         
+                    for digit in range(len(batch_pred[i])-1):
+                        batch_pred[i][digit] += pred[digit]
+    results = []
+    result = []
+    for k,v in batch_pred.items():
+        result  = parse2class(v[:-1])
+        results += [[name, code] for name, code in zip(v[-1], result)]
+
+    results = sorted(results, key=lambda x: x[0])
+    write2csv(results, csv_path)
+    return results
 def predicts(model_path, csv_path):
     # 初始化wandb以记录推理过程（如果还没有初始化）
+
     if wandb.run is None:
         wandb.init(
             project="digits-recognition-inference",
@@ -705,10 +1129,10 @@ def predicts(model_path, csv_path):
         DigitsDataset(mode="test", aug=False),
         batch_size=config.batch_size,
         shuffle=False,
-        num_workers=0,
+        num_workers=4,
         pin_memory=True,
         drop_last=False,
-        # persistent_workers=True,
+        persistent_workers=True,
     )
     results = []
     res_path = model_path
@@ -716,9 +1140,22 @@ def predicts(model_path, csv_path):
     # 根据模型路径判断使用哪个模型架构
     if "resnet101" in model_path:
         res_net = DigitsResnet101().cuda()
-    else:
+    elif "resnet50" in model_path:
         res_net = DigitsResnet50().cuda()
-
+    elif "vit" in model_path:
+        res_net = DigitsViT().cuda()
+    elif "inception_v4" in model_path:
+        res_net = DigitsInceptionV4().cuda()
+    elif "inception_resnet_v2" in model_path:
+        res_net = DigitsInceptionResNetV2().cuda()
+    elif"xception" in model_path:
+        res_net = DigitsXception().cuda()
+    elif "mobilenet_v2" in model_path:
+        res_net = DigitsMobileNet(model_name='mobilenetv2_100').cuda()
+    elif "mobilenet_v3" in model_path:
+        res_net = DigitsMobileNet(model_name='mobilenetv3_large_100').cuda()
+    else:
+        raise NotImplementedError
     res_net.load_state_dict(t.load(res_path)["model"])
     print("Load model from %s successfully" % model_path)
 
@@ -764,33 +1201,39 @@ def predicts(model_path, csv_path):
         # wandb.finish()  # 完成推理后结束wandb会话
 
     return results
-
+def find_line_with_content(content):
+    """查找脚本中包含特定内容的行"""
+    lines=[]
+    with open(__file__, 'r', encoding='utf-8') as file:
+        for i, line in enumerate(file, 1):
+            if content in line:
+                lines.append(line.strip())
 
 if __name__ == "__main__":
     # 创建带时间戳的文件夹
-    config.model = "vit"
-    config.epoches = 17
-    config.scheduler_T0 = 50
-    # for freeze_layer_num in range(0, 10):
-    # config.freeze_layer_num = freeze_layer_num
-    save_dir = create_timestamped_folder(f"{config.model}", base_dir="result")
+    config.model = "resnet101"
+    config.epoches = 13
+    config.scheduler_T0 = 40
+    config.lr =0.001
+    config.scheduler_eta_min = 0.0
+    config.scheduler = "CosineAnnealingWarmRestarts"
+    # config.pretrained = "result/2025-04-14_16-51-52_freeze_0_resnet101/checkpoints/epoch-resnet50-14-acc-78.50.pth"
+    # for freeze_layer_num in [4,8,12,16,2,6,10,14,]:
+    config.freeze_layer_num = 3
+    save_dir = create_timestamped_folder(f"{config.model}_freeze{config.freeze_layer_num}", base_dir="result")
     config.checkpoints = os.path.join(save_dir, "checkpoints")
     # 初始化wandb
+    config_dict = {}
+    for attr in dir(config):
+        if not attr.startswith('__'):
+            value = getattr(config, attr)
+            if not callable(value):
+                config_dict[attr] = value
+    config_dict["dataset"]=find_line_with_content("hook for dataset wandb")
     wandb.init(
         project="digits-recognition",
-        name=f"{config.model}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-        config={
-            "model": config.model,
-            "batch_size": config.batch_size,
-            "learning_rate": config.lr,
-            "epochs": config.epoches,
-            "optimizer": "Adam",
-            "scheduler": config.scheduler,
-            "label_smoothing": config.smooth,
-            "pretrained": config.pretrained,
-            "freeze_layer_num": config.freeze_layer_num,
-            "class_num": config.class_num,
-        },
+        name=f"{config.model}_originalsetup_train_val_freeze{config.freeze_layer_num}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+        config=config_dict
     )
 
     # 训练模型
@@ -803,4 +1246,4 @@ if __name__ == "__main__":
     # 结束wandb会话
     wandb.finish()
 
-# predicts("/data/zhangzicheng/workspace/study/Char_Recognizer/result/2025-04-14_12-47-15_freeze_6_resnet101/checkpoints/epoch-resnet50-33-acc-78.03.pth","result.csv")
+# predicts_tts("result/2025-04-14_14-39-18_freeze_0_resnet101/checkpoints/epoch-resnet50-13-acc-79.06.pth","result.csv",1)
